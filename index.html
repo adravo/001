@@ -1,0 +1,664 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+<title>Snake Aquarium</title>
+<style>
+* { margin: 0; padding: 0; box-sizing: border-box; }
+body {
+  background: #001428;
+  min-height: 100vh;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  font-family: Arial, sans-serif;
+  color: #bae6fd;
+  overflow: hidden;
+}
+h1 {
+  font-size: clamp(1.1rem, 4vw, 1.7rem);
+  color: #7dd3fc;
+  text-shadow: 0 0 18px #38bdf8;
+  margin-bottom: 6px;
+  letter-spacing: 2px;
+}
+#hud {
+  font-size: clamp(0.8rem, 2.8vw, 1rem);
+  margin-bottom: 8px;
+  letter-spacing: 1px;
+}
+canvas {
+  display: block;
+  border: 2px solid #0369a1;
+  border-radius: 8px;
+  box-shadow: 0 0 30px rgba(3,105,161,0.55), inset 0 0 30px rgba(0,0,0,0.3);
+}
+#dpad {
+  display: grid;
+  grid-template-areas: ". up ." "left . right" ". dn .";
+  grid-template-columns: 54px 54px 54px;
+  grid-template-rows: 54px 10px 54px;
+  gap: 3px;
+  margin-top: 14px;
+}
+.btn {
+  border: 2px solid rgba(56,189,248,0.55);
+  background: rgba(7,89,133,0.38);
+  border-radius: 10px;
+  color: #bae6fd;
+  font-size: 24px;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  touch-action: manipulation;
+  -webkit-tap-highlight-color: transparent;
+  transition: background 0.1s, transform 0.1s;
+}
+.btn:active { background: rgba(56,189,248,0.45); transform: scale(0.92); }
+#overlay {
+  display: none;
+  position: fixed;
+  inset: 0;
+  background: rgba(0,5,20,0.88);
+  z-index: 20;
+  align-items: center;
+  justify-content: center;
+}
+#overlay.on { display: flex; }
+.popup {
+  background: #020f1f;
+  border: 2px solid #0369a1;
+  border-radius: 16px;
+  padding: 28px 44px;
+  text-align: center;
+  box-shadow: 0 0 40px rgba(3,105,161,0.5);
+  max-width: 90vw;
+}
+.popup h2 { font-size: 1.9em; margin-bottom: 10px; }
+.popup p { color: #7dd3fc; margin-bottom: 22px; font-size: 1.05em; line-height: 1.65; }
+.popup button {
+  background: #0369a1;
+  border: none;
+  border-radius: 10px;
+  color: #fff;
+  padding: 12px 38px;
+  font-size: 1.1em;
+  cursor: pointer;
+  letter-spacing: 1px;
+  transition: background 0.2s;
+}
+.popup button:hover { background: #0ea5e9; }
+</style>
+</head>
+<body>
+
+<h1>&#x1F40D; Snake Aquarium &#x1F41F;</h1>
+<div id="hud">
+  Score: <b id="sc">0</b> &nbsp;|&nbsp;
+  Fish Eaten: <b id="fe">0</b> &nbsp;|&nbsp;
+  Length: <b id="ln">3</b>
+</div>
+<canvas id="c"></canvas>
+
+<div id="dpad">
+  <button class="btn" id="bu" style="grid-area:up">&#9650;</button>
+  <button class="btn" id="bl" style="grid-area:left">&#9664;</button>
+  <button class="btn" id="br" style="grid-area:right">&#9654;</button>
+  <button class="btn" id="bd" style="grid-area:dn">&#9660;</button>
+</div>
+
+<div id="overlay" class="on">
+  <div class="popup">
+    <h2 id="ot" style="color:#7dd3fc">&#x1F40D; Snake Aquarium</h2>
+    <p id="om">
+      Swim through the ocean and eat as many fish as you can!<br><br>
+      <b>Arrow keys / WASD</b> &mdash; change direction<br>
+      <b>On-screen buttons</b> or <b>swipe</b> on touch devices<br><br>
+      Avoid the walls and your own tail!
+    </p>
+    <button id="ob">Start Game</button>
+  </div>
+</div>
+
+<script>
+// ── Constants ──────────────────────────────────────────────────────────────────
+const COLS = 25, ROWS = 22, CS = 24;
+const W = COLS * CS, H = ROWS * CS;
+const FLOOR_ROW = ROWS - 1; // sand row — cannot enter
+
+// ── Canvas ────────────────────────────────────────────────────────────────────
+const canvas = document.getElementById('c');
+const ctx = canvas.getContext('2d');
+canvas.width = W;
+canvas.height = H;
+
+function resize() {
+  const mw = window.innerWidth - 16;
+  const mh = window.innerHeight * 0.58;
+  const sc = Math.min(1, mw / W, mh / H);
+  canvas.style.width  = (W * sc) + 'px';
+  canvas.style.height = (H * sc) + 'px';
+}
+window.addEventListener('resize', resize);
+resize();
+
+// ── Static background decorations ─────────────────────────────────────────────
+const bubbles = Array.from({ length: 22 }, () => ({
+  x: Math.random() * W,
+  y: Math.random() * H,
+  r: 1.4 + Math.random() * 4.2,
+  speed: 0.14 + Math.random() * 0.5,
+  phase: Math.random() * Math.PI * 2
+}));
+
+const weeds = Array.from({ length: 9 }, (_, i) => ({
+  x: 24 + i * ((W - 48) / 8),
+  h: 46 + Math.random() * 60,
+  phase: Math.random() * Math.PI * 2,
+  segs: 4 + Math.floor(Math.random() * 4),
+  hue: 112 + Math.floor(Math.random() * 48),
+  lum: 22 + Math.floor(Math.random() * 14)
+}));
+
+// Rocks / coral on sea floor
+const rocks = Array.from({ length: 10 }, (_, i) => ({
+  x: 18 + i * (W / 10) + (Math.random() - 0.5) * 20,
+  w: 8 + Math.random() * 14,
+  h: 6 + Math.random() * 10,
+  color: Math.random() < 0.4
+    ? `hsl(${340 + Math.random() * 30},60%,${35 + Math.random()*15}%)`
+    : `hsl(30,30%,${22 + Math.random()*14}%)`
+}));
+
+// ── Draw background ───────────────────────────────────────────────────────────
+function drawBg(t) {
+  // Deep ocean gradient
+  const g = ctx.createLinearGradient(0, 0, 0, H);
+  g.addColorStop(0,   '#0d3f6a');
+  g.addColorStop(0.5, '#072f55');
+  g.addColorStop(1,   '#031e38');
+  ctx.fillStyle = g;
+  ctx.fillRect(0, 0, W, H);
+
+  // Drifting light shafts
+  ctx.save();
+  ctx.globalAlpha = 0.038;
+  ctx.fillStyle = '#fff';
+  for (let i = 0; i < 5; i++) {
+    const sx = W * (i + 0.3) / 5 + Math.sin(t * 0.00055 + i * 1.4) * 22;
+    ctx.beginPath();
+    ctx.moveTo(sx - 38, 0); ctx.lineTo(sx + 38, 0);
+    ctx.lineTo(sx + 70, H); ctx.lineTo(sx - 6, H);
+    ctx.fill();
+  }
+  ctx.restore();
+
+  // Seaweed
+  ctx.lineCap = 'round';
+  for (const w of weeds) {
+    const segH = w.h / w.segs;
+    ctx.strokeStyle = `hsl(${w.hue},52%,${w.lum}%)`;
+    ctx.lineWidth = 5;
+    ctx.beginPath();
+    ctx.moveTo(w.x, H - CS);
+    let cx = w.x;
+    for (let s = 0; s < w.segs; s++) {
+      const wave = Math.sin(t * 0.0011 + w.phase + s * 0.85) * 7;
+      const ny   = H - CS - (s + 1) * segH;
+      cx = w.x + wave;
+      ctx.quadraticCurveTo(w.x + wave * 1.6, ny + segH / 2, cx, ny);
+    }
+    ctx.stroke();
+  }
+
+  // Sandy floor
+  const sand = ctx.createLinearGradient(0, H - CS, 0, H);
+  sand.addColorStop(0, '#7c521a');
+  sand.addColorStop(1, '#5a3b10');
+  ctx.fillStyle = sand;
+  ctx.fillRect(0, H - CS, W, CS);
+
+  // Rocks / coral
+  for (const r of rocks) {
+    ctx.fillStyle = r.color;
+    ctx.beginPath();
+    ctx.ellipse(r.x, H - CS * 0.5, r.w, r.h * 0.5, 0, 0, Math.PI * 2);
+    ctx.fill();
+  }
+
+  // Pebbles
+  ctx.fillStyle = '#3a2508';
+  for (let i = 0; i < 18; i++) {
+    const px = 15 + (i * 163) % (W - 30);
+    ctx.beginPath();
+    ctx.ellipse(px, H - 7, 5 + (i * 7) % 7, 3, 0, 0, Math.PI * 2);
+    ctx.fill();
+  }
+
+  // Bubbles
+  ctx.lineWidth = 1;
+  for (const b of bubbles) {
+    b.y -= b.speed;
+    if (b.y + b.r < 0) { b.y = H + b.r; b.x = Math.random() * W; }
+    b.phase += 0.016;
+    const bx = b.x + Math.sin(b.phase) * 1.6;
+    ctx.strokeStyle = 'rgba(186,230,253,0.44)';
+    ctx.beginPath(); ctx.arc(bx, b.y, b.r, 0, Math.PI * 2); ctx.stroke();
+    ctx.fillStyle  = 'rgba(186,230,253,0.07)'; ctx.fill();
+  }
+}
+
+// ── Fish drawing ──────────────────────────────────────────────────────────────
+const PALETTE = ['#f97316','#ec4899','#8b5cf6','#06b6d4','#eab308','#f43f5e','#10b981','#a78bfa'];
+
+function drawFish(f, sz, t) {
+  const px = f.x * CS + CS / 2;
+  const py = f.y * CS + CS / 2;
+  const bob = Math.sin(t * 0.0032 + f.phase) * 1.6;
+
+  ctx.save();
+  ctx.translate(px, py + bob);
+  ctx.scale(f.facing, 1);
+
+  const s = sz;
+
+  // Tail wag
+  const wag = Math.sin(t * 0.011 + f.phase * 2) * 0.3 * s;
+  ctx.fillStyle = f.color;
+  ctx.beginPath();
+  ctx.moveTo(-s * 0.4, 0);
+  ctx.lineTo(-s * 0.78, -s * 0.38 + wag);
+  ctx.lineTo(-s * 0.78,  s * 0.38 + wag);
+  ctx.closePath();
+  ctx.fill();
+
+  // Body
+  ctx.fillStyle = f.color;
+  ctx.beginPath();
+  ctx.ellipse(0, 0, s * 0.52, s * 0.31, 0, 0, Math.PI * 2);
+  ctx.fill();
+
+  // Belly highlight
+  ctx.fillStyle = 'rgba(255,255,255,0.22)';
+  ctx.beginPath();
+  ctx.ellipse(s * 0.06, s * 0.07, s * 0.32, s * 0.14, -0.18, 0, Math.PI * 2);
+  ctx.fill();
+
+  // Dorsal fin
+  ctx.fillStyle = f.color;
+  ctx.globalAlpha = 0.78;
+  ctx.beginPath();
+  ctx.moveTo(-s * 0.14, -s * 0.31);
+  ctx.lineTo( s * 0.1,  -s * 0.6);
+  ctx.lineTo( s * 0.36, -s * 0.31);
+  ctx.closePath();
+  ctx.fill();
+  ctx.globalAlpha = 1;
+
+  // Eye white
+  ctx.fillStyle = '#fff';
+  ctx.beginPath();
+  ctx.arc(s * 0.22, -s * 0.04, s * 0.13, 0, Math.PI * 2);
+  ctx.fill();
+  // Pupil
+  ctx.fillStyle = '#111';
+  ctx.beginPath();
+  ctx.arc(s * 0.245, -s * 0.04, s * 0.07, 0, Math.PI * 2);
+  ctx.fill();
+  // Eye glint
+  ctx.fillStyle = '#fff';
+  ctx.beginPath();
+  ctx.arc(s * 0.268, -s * 0.065, s * 0.027, 0, Math.PI * 2);
+  ctx.fill();
+
+  // Scale arcs
+  ctx.strokeStyle = 'rgba(255,255,255,0.17)';
+  ctx.lineWidth = 0.8;
+  for (const ox of [-s * 0.17, 0, s * 0.17]) {
+    ctx.beginPath();
+    ctx.arc(ox, 0, s * 0.2, Math.PI * 0.15, Math.PI * 0.85);
+    ctx.stroke();
+  }
+
+  ctx.restore();
+}
+
+// ── Snake drawing ─────────────────────────────────────────────────────────────
+function drawSnake(snake, dir, t) {
+  const len = snake.length;
+  const perp = { x: -dir.y, y: dir.x };
+
+  for (let i = len - 1; i >= 0; i--) {
+    const seg = snake[i];
+    const px = seg.x * CS + CS / 2;
+    const py = seg.y * CS + CS / 2;
+    const fade = i / len;
+    const r = CS * 0.44 * (1 - fade * 0.42);
+
+    if (i === 0) {
+      // Head — glow
+      ctx.shadowColor = '#4ade80';
+      ctx.shadowBlur  = 10;
+      ctx.fillStyle   = '#15803d';
+      ctx.beginPath(); ctx.arc(px, py, r + 1, 0, Math.PI * 2); ctx.fill();
+      ctx.shadowBlur = 0;
+
+      // Head fill
+      ctx.fillStyle = '#22c55e';
+      ctx.beginPath(); ctx.arc(px, py, r, 0, Math.PI * 2); ctx.fill();
+      ctx.fillStyle = '#4ade80';
+      ctx.beginPath(); ctx.arc(px - dir.x * r * 0.35, py - dir.y * r * 0.35, r * 0.55, 0, Math.PI * 2); ctx.fill();
+
+      // Eyes
+      for (const sign of [1, -1]) {
+        const ex = px + dir.x * r * 0.35 + perp.x * sign * r * 0.4;
+        const ey = py + dir.y * r * 0.35 + perp.y * sign * r * 0.4;
+        ctx.fillStyle = '#fff';
+        ctx.beginPath(); ctx.arc(ex, ey, r * 0.27, 0, Math.PI * 2); ctx.fill();
+        ctx.fillStyle = '#0f172a';
+        ctx.beginPath(); ctx.arc(ex + dir.x * 1.8, ey + dir.y * 1.8, r * 0.14, 0, Math.PI * 2); ctx.fill();
+      }
+
+      // Forked tongue (blinks)
+      if ((t % 1300) < 550) {
+        const tx = px + dir.x * (r + 2);
+        const ty = py + dir.y * (r + 2);
+        ctx.strokeStyle = '#fb7185';
+        ctx.lineWidth   = 1.6;
+        ctx.lineCap     = 'round';
+        ctx.beginPath();
+        ctx.moveTo(tx, ty);
+        ctx.lineTo(tx + dir.x * 8, ty + dir.y * 8);
+        for (const fs of [1, -1]) {
+          ctx.moveTo(tx + dir.x * 5, ty + dir.y * 5);
+          ctx.lineTo(tx + dir.x * 8 + perp.x * fs * 3.5, ty + dir.y * 8 + perp.y * fs * 3.5);
+        }
+        ctx.stroke();
+      }
+
+    } else {
+      // Body segment
+      ctx.fillStyle = (i % 2 === 0) ? '#166534' : '#15803d';
+      ctx.beginPath(); ctx.arc(px, py, r, 0, Math.PI * 2); ctx.fill();
+      if (i % 2 === 0) {
+        ctx.fillStyle = 'rgba(255,255,255,0.1)';
+        ctx.beginPath(); ctx.arc(px, py, r * 0.48, 0, Math.PI * 2); ctx.fill();
+      }
+    }
+  }
+}
+
+// ── Eat effects ───────────────────────────────────────────────────────────────
+let effects = [];
+
+function spawnEffect(x, y, now) {
+  effects.push({ x, y, born: now });
+}
+
+function drawEffects(t) {
+  effects = effects.filter(e => t - e.born < 750);
+  for (const e of effects) {
+    const age = (t - e.born) / 750;
+    const px  = e.x * CS + CS / 2;
+    const py  = e.y * CS + CS / 2;
+    // Particles
+    for (let i = 0; i < 8; i++) {
+      const angle = (i / 8) * Math.PI * 2;
+      const dist  = age * CS * 2.4;
+      ctx.fillStyle = `rgba(251,191,36,${(1 - age) * 0.9})`;
+      ctx.beginPath();
+      ctx.arc(px + Math.cos(angle) * dist, py + Math.sin(angle) * dist, 3.5 * (1 - age), 0, Math.PI * 2);
+      ctx.fill();
+    }
+    // "+1" floating text
+    ctx.save();
+    ctx.globalAlpha   = Math.max(0, 1 - age * 1.5);
+    ctx.fillStyle     = '#fbbf24';
+    ctx.font          = `bold ${14 + age * 7}px Arial`;
+    ctx.textAlign     = 'center';
+    ctx.textBaseline  = 'middle';
+    ctx.fillText('+1', px, py - age * 30);
+    ctx.restore();
+  }
+}
+
+// ── Game state ────────────────────────────────────────────────────────────────
+let snake, dir, nextDir, fishes, score, fishEaten, snakeSpeed, running, raf;
+let lastStep = 0, lastFishTick = 0;
+
+const MAX_FISH = 3;
+
+function makeFish() {
+  if (fishes.length >= MAX_FISH) return;
+  let pos, tries = 0;
+  do {
+    pos = {
+      x: 1 + Math.floor(Math.random() * (COLS - 2)),
+      y: 1 + Math.floor(Math.random() * (ROWS - 3))
+    };
+    tries++;
+  } while (tries < 200 && (
+    snake.some(s => s.x === pos.x && s.y === pos.y) ||
+    fishes.some(f => Math.abs(f.x - pos.x) + Math.abs(f.y - pos.y) < 3)
+  ));
+  fishes.push({
+    x: pos.x, y: pos.y,
+    facing: 1,
+    phase: Math.random() * Math.PI * 2,
+    color: PALETTE[Math.floor(Math.random() * PALETTE.length)],
+    timer: 0,
+    interval: 380 + Math.random() * 540
+  });
+}
+
+function init() {
+  snake    = [{ x: 12, y: 10 }, { x: 11, y: 10 }, { x: 10, y: 10 }];
+  dir      = { x: 1, y: 0 };
+  nextDir  = { x: 1, y: 0 };
+  fishes   = [];
+  effects  = [];
+  score    = 0;
+  fishEaten = 0;
+  snakeSpeed = 165;
+  running  = true;
+  lastStep = 0;
+  lastFishTick = 0;
+  makeFish(); makeFish();
+  updateHUD();
+  document.getElementById('overlay').classList.remove('on');
+}
+
+function updateHUD() {
+  document.getElementById('sc').textContent = score;
+  document.getElementById('fe').textContent = fishEaten;
+  document.getElementById('ln').textContent = snake.length;
+}
+
+// ── Fish AI ───────────────────────────────────────────────────────────────────
+function tickFish(dt) {
+  for (const f of fishes) {
+    f.timer += dt;
+    if (f.timer < f.interval) continue;
+    f.timer = 0;
+
+    const head = snake[0];
+    const dx   = f.x - head.x;
+    const dy   = f.y - head.y;
+    const dist = Math.abs(dx) + Math.abs(dy);
+
+    let candidates;
+    if (dist < 9 && Math.random() > 0.25) {
+      // Flee away from snake head
+      const primary   = Math.abs(dx) >= Math.abs(dy)
+        ? { x: dx > 0 ? 1 : -1, y: 0 }
+        : { x: 0, y: dy > 0 ? 1 : -1 };
+      const secondary = Math.abs(dx) >= Math.abs(dy)
+        ? { x: 0, y: Math.random() < 0.5 ? 1 : -1 }
+        : { x: Math.random() < 0.5 ? 1 : -1, y: 0 };
+      candidates = [primary, secondary];
+    } else {
+      // Random wander
+      const all = [{ x:1,y:0 },{ x:-1,y:0 },{ x:0,y:1 },{ x:0,y:-1 }];
+      // Shuffle
+      for (let i = all.length - 1; i > 0; i--) {
+        const j = Math.floor(Math.random() * (i + 1));
+        [all[i], all[j]] = [all[j], all[i]];
+      }
+      candidates = all;
+    }
+
+    for (const d of candidates) {
+      const nx = f.x + d.x;
+      const ny = f.y + d.y;
+      if (nx >= 0 && nx < COLS && ny >= 0 && ny < FLOOR_ROW) {
+        f.x = nx; f.y = ny;
+        if (d.x !== 0) f.facing = d.x;
+        break;
+      }
+    }
+  }
+}
+
+// ── Snake step ────────────────────────────────────────────────────────────────
+function snakeStep() {
+  dir = { ...nextDir };
+  const newHead = { x: snake[0].x + dir.x, y: snake[0].y + dir.y };
+
+  // Wall collision
+  if (newHead.x < 0 || newHead.x >= COLS || newHead.y < 0 || newHead.y >= FLOOR_ROW) {
+    endGame(); return;
+  }
+  // Self collision
+  if (snake.some(s => s.x === newHead.x && s.y === newHead.y)) {
+    endGame(); return;
+  }
+
+  snake.unshift(newHead);
+
+  // Fish collision
+  let ate = false;
+  for (let i = 0; i < fishes.length; i++) {
+    if (fishes[i].x === newHead.x && fishes[i].y === newHead.y) {
+      spawnEffect(newHead.x, newHead.y, performance.now());
+      fishes.splice(i, 1);
+      score      += 10;
+      fishEaten  += 1;
+      snakeSpeed  = Math.max(68, snakeSpeed - 4);
+      makeFish();
+      // Bonus extra fish every 5 eaten
+      if (fishEaten % 5 === 0) makeFish();
+      ate = true;
+      break;
+    }
+  }
+
+  if (!ate) snake.pop();
+  updateHUD();
+}
+
+function endGame() {
+  running = false;
+  document.getElementById('ot').textContent    = '\uD83D\uDC80 Game Over!';
+  document.getElementById('ot').style.color    = '#f87171';
+  document.getElementById('om').innerHTML =
+    `You ate <b>${fishEaten}</b> fish!<br>
+     Score: <b>${score}</b> &nbsp;|&nbsp; Final Length: <b>${snake.length}</b>`;
+  document.getElementById('ob').textContent = 'Play Again';
+  document.getElementById('overlay').classList.add('on');
+}
+
+// ── Game loop ─────────────────────────────────────────────────────────────────
+function loop(t) {
+  // Initialise timers on first frame
+  if (lastStep     === 0) lastStep     = t;
+  if (lastFishTick === 0) lastFishTick = t;
+
+  // Background + decorations
+  drawBg(t);
+
+  // Fish AI tick
+  const fishDt = t - lastFishTick;
+  lastFishTick = t;
+  tickFish(fishDt);
+
+  // Snake step at fixed interval
+  if (running && t - lastStep >= snakeSpeed) {
+    lastStep = t;
+    snakeStep();
+  }
+
+  // Fish visual size grows with snake length
+  const fishSz = CS * (0.36 + Math.min(snake.length * 0.014, 0.46));
+  for (const f of fishes) drawFish(f, fishSz, t);
+
+  drawEffects(t);
+  drawSnake(snake, dir, t);
+
+  if (running) raf = requestAnimationFrame(loop);
+  else {
+    // Render final frame then stop
+    requestAnimationFrame(() => {
+      drawBg(t);
+      const fishSzF = CS * (0.36 + Math.min(snake.length * 0.014, 0.46));
+      for (const f of fishes) drawFish(f, fishSzF, t);
+      drawSnake(snake, dir, t);
+    });
+  }
+}
+
+// ── Controls ──────────────────────────────────────────────────────────────────
+const KEYMAP = {
+  ArrowUp: { x:0, y:-1 }, ArrowDown:  { x:0, y:1  },
+  ArrowLeft: { x:-1, y:0 }, ArrowRight: { x:1, y:0 },
+  w: { x:0, y:-1 }, s: { x:0, y:1 }, a: { x:-1, y:0 }, d: { x:1, y:0 },
+  W: { x:0, y:-1 }, S: { x:0, y:1 }, A: { x:-1, y:0 }, D: { x:1, y:0 }
+};
+
+document.addEventListener('keydown', e => {
+  const d = KEYMAP[e.key];
+  if (!d) return;
+  e.preventDefault();
+  tryDir(d);
+});
+
+function tryDir(d) {
+  // Prevent 180-degree reversal
+  if (d.x === -dir.x && d.y === -dir.y) return;
+  nextDir = d;
+}
+
+document.getElementById('bu').addEventListener('click', () => tryDir({ x:0, y:-1 }));
+document.getElementById('bd').addEventListener('click', () => tryDir({ x:0, y:1  }));
+document.getElementById('bl').addEventListener('click', () => tryDir({ x:-1, y:0 }));
+document.getElementById('br').addEventListener('click', () => tryDir({ x:1,  y:0 }));
+
+// Touch swipe on canvas
+let touchOrigin = null;
+canvas.addEventListener('touchstart', e => {
+  touchOrigin = { x: e.touches[0].clientX, y: e.touches[0].clientY };
+}, { passive: true });
+canvas.addEventListener('touchend', e => {
+  if (!touchOrigin) return;
+  const dx = e.changedTouches[0].clientX - touchOrigin.x;
+  const dy = e.changedTouches[0].clientY - touchOrigin.y;
+  touchOrigin = null;
+  if (Math.abs(dx) < 8 && Math.abs(dy) < 8) return;
+  if (Math.abs(dx) > Math.abs(dy)) {
+    tryDir(dx > 0 ? { x:1, y:0 } : { x:-1, y:0 });
+  } else {
+    tryDir(dy > 0 ? { x:0, y:1 } : { x:0, y:-1 });
+  }
+}, { passive: true });
+
+// ── Start / Restart ───────────────────────────────────────────────────────────
+document.getElementById('ob').addEventListener('click', () => {
+  cancelAnimationFrame(raf);
+  init();
+  raf = requestAnimationFrame(loop);
+});
+</script>
+</body>
+</html>
