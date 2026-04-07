@@ -1,0 +1,21 @@
+{
+  "name": "tn-land-verify-mobile",
+  "version": "1.0.0",
+  "description": "TN Land Verify — Android app (Capacitor WebView wrapper)",
+  "scripts": {
+    "add:android": "npx cap add android",
+    "sync": "npx cap sync android",
+    "build:debug": "cd android && ./gradlew assembleDebug",
+    "build:release": "cd android && ./gradlew assembleRelease"
+  },
+  "dependencies": {
+    "@capacitor/android": "^6.1.0",
+    "@capacitor/core": "^6.1.0",
+    "@capacitor/splash-screen": "^6.0.0",
+    "@capacitor/status-bar": "^6.0.0",
+    "@capacitor/network": "^6.0.0"
+  },
+  "devDependencies": {
+    "@capacitor/cli": "^6.1.0"
+  }
+}
