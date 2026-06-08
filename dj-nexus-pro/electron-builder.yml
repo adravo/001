@@ -1,0 +1,184 @@
+# ─────────────────────────────────────────────────────────────────────────────
+# DJ Nexus Pro — electron-builder configuration
+# ─────────────────────────────────────────────────────────────────────────────
+
+appId: com.djnexuspro.app
+productName: DJ Nexus Pro
+copyright: "Copyright © 2024 DJ Nexus Pro Team"
+
+# ── Files to include in the package ──────────────────────────────────────────
+files:
+  - dist/**/*
+  - node_modules/**/*
+  - package.json
+  # Native audio engine binaries
+  - src/native/**/*.node
+
+# ── Extra resources (outside asar archive for native module access) ───────────
+extraResources:
+  - from: assets/models
+    to: models
+    filter:
+      - "**/*.onnx"
+  - from: assets/samples
+    to: samples
+    filter:
+      - "**/*.wav"
+      - "**/*.mp3"
+  - from: assets/icons
+    to: icons
+  - from: src/native
+    to: native
+    filter:
+      - "**/*.node"
+
+# ── ASAR settings ─────────────────────────────────────────────────────────────
+# Unpack native .node files from the asar archive so they can be dlopen()-ed
+asarUnpack:
+  - "**/*.node"
+  - "**/node_modules/better-sqlite3/**"
+  - "**/node_modules/onnxruntime-node/**"
+
+# ── Directories ───────────────────────────────────────────────────────────────
+directories:
+  output: release
+  buildResources: assets
+
+# ── Auto-updater (GitHub Releases) ───────────────────────────────────────────
+publish:
+  provider: github
+  owner: djnexuspro
+  repo: dj-nexus-pro
+  releaseType: release
+
+# ═════════════════════════════════════════════════════════════════════════════
+# macOS
+# ═════════════════════════════════════════════════════════════════════════════
+
+mac:
+  category: public.app-category.music
+  icon: assets/icons/icon.icns
+  target:
+    - target: dmg
+      arch:
+        - x64
+        - arm64
+    - target: zip
+      arch:
+        - x64
+        - arm64
+  # Hardened runtime is required for notarisation
+  hardenedRuntime: true
+  gatekeeperAssess: false
+  # Entitlements grant JIT (needed by Electron's renderer V8)
+  entitlements: build/entitlements.mac.plist
+  entitlementsInherit: build/entitlements.mac.plist
+  # Notarisation (credentials come from env vars set in CI)
+  notarize:
+    teamId: ${APPLE_TEAM_ID}
+
+dmg:
+  title: "DJ Nexus Pro ${version}"
+  icon: assets/icons/icon.icns
+  iconSize: 128
+  window:
+    width: 660
+    height: 440
+  contents:
+    - x: 180
+      y: 220
+      type: file
+    - x: 480
+      y: 220
+      type: link
+      path: /Applications
+  background: assets/dmg-background.png
+  sign: false
+
+# ═════════════════════════════════════════════════════════════════════════════
+# Windows
+# ═════════════════════════════════════════════════════════════════════════════
+
+win:
+  icon: assets/icons/icon.ico
+  target:
+    - target: nsis
+      arch:
+        - x64
+        - ia32
+    - target: portable
+      arch: x64
+  requestedExecutionLevel: asInvoker
+  # Certificate loaded from CSC_LINK env var in CI
+  certificateSubjectName: "DJ Nexus Pro"
+  signingHashAlgorithms:
+    - sha256
+
+nsis:
+  oneClick: false
+  perMachine: false
+  allowToChangeInstallationDirectory: true
+  allowElevation: true
+  createDesktopShortcut: true
+  createStartMenuShortcut: true
+  shortcutName: "DJ Nexus Pro"
+  installerIcon: assets/icons/icon.ico
+  uninstallerIcon: assets/icons/icon.ico
+  installerHeader: assets/installer-header.bmp
+  installerHeaderIcon: assets/icons/icon.ico
+  license: LICENSE
+  include: build/installer.nsh
+  deleteAppDataOnUninstall: false
+  runAfterFinish: true
+  menuCategory: "DJ Nexus Pro"
+
+portable:
+  artifactName: "DJ-Nexus-Pro-${version}-portable-${arch}.exe"
+
+# ═════════════════════════════════════════════════════════════════════════════
+# Linux
+# ═════════════════════════════════════════════════════════════════════════════
+
+linux:
+  icon: assets/icons
+  target:
+    - target: AppImage
+      arch:
+        - x64
+        - arm64
+    - target: deb
+      arch: x64
+    - target: rpm
+      arch: x64
+    - target: tar.gz
+      arch: x64
+  category: Audio
+  description: "Professional DJ software with AI-powered features"
+  desktop:
+    Name: DJ Nexus Pro
+    Comment: Professional DJ Software
+    Keywords: dj;music;audio;mixer;turntable
+    StartupNotify: true
+    StartupWMClass: dj-nexus-pro
+  maintainer: "DJ Nexus Pro Team <dev@djnexuspro.com>"
+  vendor: "DJ Nexus Pro Team"
+  synopsis: "Professional DJ software"
+
+appImage:
+  artifactName: "DJ-Nexus-Pro-${version}-${arch}.AppImage"
+
+deb:
+  priority: optional
+  depends:
+    - libgconf-2-4
+    - libgtk-3-0
+    - libnss3
+    - libxss1
+    - libasound2
+
+rpm:
+  depends:
+    - alsa-lib
+    - gtk3
+    - nss
+    - libXScrnSaver
