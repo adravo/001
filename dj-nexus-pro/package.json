@@ -24,9 +24,11 @@
     "lint": "eslint src electron --ext .ts,.tsx",
     "lint:fix": "eslint src electron --ext .ts,.tsx --fix",
     "typecheck": "tsc --noEmit",
+    "typecheck:electron": "tsc -p tsconfig.electron.json --noEmit",
     "test": "vitest",
     "test:ui": "vitest --ui",
-    "test:coverage": "vitest --coverage"
+    "test:coverage": "vitest --coverage",
+    "postinstall": "electron-builder install-app-deps"
   },
   "dependencies": {
     "better-sqlite3": "^9.4.3",
@@ -35,7 +37,10 @@
     "electron-updater": "^6.1.8",
     "onnxruntime-node": "^1.17.3",
     "uuid": "^9.0.1",
-    "zustand": "^4.5.2"
+    "zustand": "^4.5.2",
+    "immer": "^10.0.4",
+    "react": "^18.2.0",
+    "react-dom": "^18.2.0"
   },
   "devDependencies": {
     "@electron-forge/cli": "^7.3.1",
@@ -53,18 +58,19 @@
     "eslint": "^8.57.0",
     "eslint-plugin-react": "^7.34.0",
     "eslint-plugin-react-hooks": "^4.6.0",
-    "react": "^18.2.0",
-    "react-dom": "^18.2.0",
     "typescript": "^5.3.3",
     "vite": "^5.1.4",
     "vitest": "^1.3.1",
-    "wait-on": "^7.2.0"
+    "wait-on": "^7.2.0",
+    "@vitest/coverage-v8": "^1.3.1",
+    "@vitest/ui": "^1.3.1"
   },
   "build": {
     "appId": "com.djnexuspro.app",
     "productName": "DJ Nexus Pro",
     "directories": {
-      "output": "release"
+      "output": "release",
+      "buildResources": "assets"
     },
     "files": [
       "dist/**/*",
@@ -76,6 +82,11 @@
         "from": "assets/models",
         "to": "models",
         "filter": ["**/*.onnx"]
+      },
+      {
+        "from": "assets/samples",
+        "to": "samples",
+        "filter": ["**/*.wav", "**/*.mp3"]
       }
     ],
     "mac": {
@@ -83,12 +94,14 @@
       "icon": "assets/icons/icon.icns",
       "target": ["dmg", "zip"],
       "hardenedRuntime": true,
+      "gatekeeperAssess": false,
       "entitlements": "build/entitlements.mac.plist",
       "entitlementsInherit": "build/entitlements.mac.plist"
     },
     "win": {
       "icon": "assets/icons/icon.ico",
-      "target": ["nsis", "portable"]
+      "target": ["nsis", "portable"],
+      "requestedExecutionLevel": "asInvoker"
     },
     "linux": {
       "icon": "assets/icons/icon.png",
@@ -97,7 +110,18 @@
     },
     "nsis": {
       "oneClick": false,
-      "allowToChangeInstallationDirectory": true
+      "allowToChangeInstallationDirectory": true,
+      "createDesktopShortcut": true,
+      "createStartMenuShortcut": true
+    },
+    "publish": {
+      "provider": "github",
+      "owner": "djnexuspro",
+      "repo": "dj-nexus-pro"
     }
+  },
+  "engines": {
+    "node": ">=18.0.0",
+    "npm": ">=9.0.0"
   }
 }
