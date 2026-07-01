@@ -28,6 +28,9 @@ pids/
 backend/screenshots/
 backend/tmp/
 
+# AI Training Assistant: persisted per-tenant RAG snapshots
+ai-training-assistant/backend/data/
+
 # OS
 .DS_Store
 Thumbs.db
