@@ -2,6 +2,8 @@ import Anthropic from '@anthropic-ai/sdk';
 import type { ChatMessage, ChatResult, DocumentChunk, ResponseTone } from '../types';
 
 const CLAUDE_MODEL = process.env.CLAUDE_MODEL || 'claude-sonnet-5';
+const RESPOND_TOOL_NAME = 'respond_to_trainee';
+const VALID_TONES: ResponseTone[] = ['neutral', 'positive', 'thinking', 'concerned'];
 
 let client: Anthropic | null = null;
 function getClient(): Anthropic {
@@ -13,9 +15,6 @@ function getClient(): Anthropic {
   }
   return client;
 }
-
-const TONE_TAG = /^\s*\[tone:\s*(neutral|positive|thinking|concerned)\]\s*/i;
-const VALID_TONES: ResponseTone[] = ['neutral', 'positive', 'thinking', 'concerned'];
 
 function buildSystemPrompt(orgName: string, contextChunks: DocumentChunk[]): string {
   const context = contextChunks.length
@@ -29,13 +28,41 @@ You help trainees understand the company's own training material.
 
 Rules:
 - Ground every factual answer in the CONTEXT below. If the context doesn't cover the question, say so honestly instead of guessing.
-- Keep answers conversational and concise (2-5 sentences) since they will be spoken aloud by a TTS voice, not read as text.
-- Do not use markdown, bullet points, or headings — plain spoken sentences only.
-- Start your reply with exactly one tone tag on its own, chosen from: [tone: neutral], [tone: positive], [tone: thinking], [tone: concerned]. Use "positive" for encouraging/correct-answer moments, "thinking" when reasoning through something nuanced or when context is thin, "concerned" when flagging a safety/compliance point, otherwise "neutral". This tag drives the avatar's gesture and is stripped before the trainee hears it.
+- Keep the reply conversational and concise (2-5 sentences) since it will be spoken aloud by a TTS voice, not read as text.
+- Do not use markdown, bullet points, or headings in the reply — plain spoken sentences only.
+- You must call the ${RESPOND_TOOL_NAME} tool to deliver your answer, choosing "tone" honestly: "positive" for encouraging/correct-answer moments, "thinking" when reasoning through something nuanced or when context is thin, "concerned" when flagging a safety/compliance point, otherwise "neutral". The tone drives the avatar's gesture.
 
 CONTEXT:
 ${context}`;
 }
+
+// The avatar's gesture and the spoken reply are both required in every turn,
+// so they're forced through a single tool call rather than parsed out of
+// free-form text: a text-embedded "[tone: ...]" tag is a fragile contract
+// (the model can phrase around it, and a failed match would either read the
+// literal tag aloud or silently mis-fire the gesture) with no way to detect
+// drift. Structured tool output makes malformed responses a hard SDK-level
+// error instead of a silent UX bug.
+const RESPOND_TOOL: Anthropic.Tool = {
+  name: RESPOND_TOOL_NAME,
+  description:
+    "Deliver the spoken answer to the trainee, along with the emotional tone that drives the avatar's gesture.",
+  input_schema: {
+    type: 'object',
+    properties: {
+      tone: {
+        type: 'string',
+        enum: VALID_TONES,
+        description: 'The emotional tone of this reply, used to trigger the avatar\'s gesture.',
+      },
+      reply: {
+        type: 'string',
+        description: 'The spoken answer: plain conversational sentences, no markdown.',
+      },
+    },
+    required: ['tone', 'reply'],
+  },
+};
 
 export async function generateGroundedAnswer(
   orgName: string,
@@ -58,19 +85,25 @@ export async function generateGroundedAnswer(
     max_tokens: 500,
     system: buildSystemPrompt(orgName, contextChunks),
     messages,
+    tools: [RESPOND_TOOL],
+    tool_choice: { type: 'tool', name: RESPOND_TOOL_NAME },
   });
 
-  const rawText = response.content
-    .filter((block): block is Anthropic.TextBlock => block.type === 'text')
-    .map((block) => block.text)
-    .join('\n')
-    .trim();
+  const toolUse = response.content.find(
+    (block): block is Anthropic.ToolUseBlock => block.type === 'tool_use' && block.name === RESPOND_TOOL_NAME,
+  );
+  if (!toolUse) {
+    throw new Error('The model did not return a structured response.');
+  }
 
-  const toneMatch = rawText.match(TONE_TAG);
-  const tone = (toneMatch && VALID_TONES.includes(toneMatch[1].toLowerCase() as ResponseTone)
-    ? (toneMatch[1].toLowerCase() as ResponseTone)
-    : 'neutral');
-  const reply = rawText.replace(TONE_TAG, '').trim();
+  const input = toolUse.input as Partial<{ tone: string; reply: string }>;
+  const tone: ResponseTone = VALID_TONES.includes(input.tone as ResponseTone)
+    ? (input.tone as ResponseTone)
+    : 'neutral';
+  const reply = input.reply?.trim();
+  if (!reply) {
+    throw new Error('The model returned an empty reply.');
+  }
 
   return {
     reply,

@@ -1,44 +1,69 @@
 import dns from 'node:dns/promises';
 import net from 'node:net';
+import { Agent } from 'undici';
+import { IngestionError } from './ingestionError';
+
+export interface GuardedUrl {
+  url: URL;
+  /**
+   * A dispatcher pinned to the exact IP validated by this guard. Call
+   * `dispatcher.close()` once the request using it is done.
+   */
+  dispatcher: Agent;
+}
 
 /**
- * Best-effort SSRF guard for the admin-triggered "ingest from URL" feature:
- * rejects non-http(s) schemes and resolves the hostname to block requests
- * aimed at loopback/private/link-local addresses (cloud metadata endpoints,
- * internal services, etc). This is defense-in-depth, not a complete
- * mitigation — a DNS-rebinding attacker could still change the record
- * between this check and the actual fetch, which is why the ingestion
- * fetch also refuses to follow redirects (a common bypass vector).
+ * SSRF guard for the admin-triggered "ingest from URL" feature: rejects
+ * non-http(s) schemes, resolves the hostname, and blocks loopback/private/
+ * link-local/reserved addresses (including the cloud metadata IP).
+ *
+ * Crucially, the returned `dispatcher` pins the actual HTTP connection to the
+ * one IP address that was just validated — the caller must use it for the
+ * fetch. Re-resolving the hostname at fetch time (the naive approach) would
+ * reopen the exact gap this guard exists to close: an attacker controlling
+ * DNS for their domain could return a public IP for this check and a
+ * private/internal IP moments later for the real connection (DNS rebinding).
+ * Pinning to the validated IP, rather than re-trusting the hostname, is what
+ * makes the check load-bearing instead of decorative.
  */
-export async function assertPublicHttpUrl(rawUrl: string): Promise<URL> {
+export async function assertPublicHttpUrl(rawUrl: string): Promise<GuardedUrl> {
   let url: URL;
   try {
     url = new URL(rawUrl);
   } catch {
-    throw new Error('That is not a valid URL.');
+    throw new IngestionError('That is not a valid URL.');
   }
 
   if (url.protocol !== 'http:' && url.protocol !== 'https:') {
-    throw new Error('Only http:// and https:// URLs can be ingested.');
+    throw new IngestionError('Only http:// and https:// URLs can be ingested.');
   }
 
   const hostname = url.hostname.toLowerCase();
   if (hostname === 'localhost' || hostname.endsWith('.localhost')) {
-    throw new Error('Local URLs cannot be ingested.');
+    throw new IngestionError('Local URLs cannot be ingested.');
   }
 
-  let addresses: { address: string }[];
+  let addresses: { address: string; family: number }[];
   try {
     addresses = await dns.lookup(hostname, { all: true });
   } catch {
-    throw new Error('Could not resolve that URL\'s host.');
+    throw new IngestionError("Could not resolve that URL's host.");
   }
 
   if (addresses.length === 0 || addresses.some((a) => isPrivateOrReservedIp(a.address))) {
-    throw new Error('URLs resolving to private or internal addresses cannot be ingested.');
+    throw new IngestionError('URLs resolving to private or internal addresses cannot be ingested.');
   }
 
-  return url;
+  const pinned = addresses[0];
+  const dispatcher = new Agent({
+    connect: {
+      lookup: (_hostname, _options, callback) => {
+        callback(null, [{ address: pinned.address, family: pinned.family as 4 | 6 }]);
+      },
+    },
+  });
+
+  return { url, dispatcher };
 }
 
 function isPrivateOrReservedIp(ip: string): boolean {

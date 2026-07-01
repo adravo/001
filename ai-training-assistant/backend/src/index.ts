@@ -1,10 +1,12 @@
 import 'dotenv/config';
 import cors from 'cors';
-import express from 'express';
+import express, { NextFunction, Request, Response } from 'express';
+import { MulterError } from 'multer';
 import { chatRouter } from './routes/chat';
 import { documentsRouter } from './routes/documents';
 import { ttsRouter } from './routes/tts';
 import { usageRouter } from './routes/usage';
+import { IngestionError } from './services/ingestionError';
 import { isServerTtsConfigured } from './services/tts';
 
 const app = express();
@@ -28,6 +30,23 @@ app.use('/api/tenants/:tenantId/documents', documentsRouter);
 app.use('/api/tenants/:tenantId/chat', chatRouter);
 app.use('/api/tenants/:tenantId/tts', ttsRouter);
 app.use('/api/tenants/:tenantId/usage', usageRouter);
+
+// Catches errors thrown by middleware that runs before a route handler's own
+// try/catch — multer's upload.single() (file-size limit, fileFilter
+// rejections) surfaces errors this way, and without a handler here they'd
+// fall through to Express's default HTML error page instead of JSON.
+app.use((err: unknown, _req: Request, res: Response, _next: NextFunction) => {
+  if (err instanceof IngestionError) {
+    return res.status(400).json({ error: err.message });
+  }
+  if (err instanceof MulterError) {
+    const message =
+      err.code === 'LIMIT_FILE_SIZE' ? 'That file is too large (15MB limit).' : 'File upload failed.';
+    return res.status(400).json({ error: message });
+  }
+  console.error('[server] unhandled error:', err);
+  res.status(500).json({ error: 'Internal server error.' });
+});
 
 app.listen(PORT, () => {
   console.log(`AI Training Assistant backend listening on http://localhost:${PORT}`);

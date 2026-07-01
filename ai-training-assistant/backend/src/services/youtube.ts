@@ -1,4 +1,5 @@
 import { YoutubeTranscript } from 'youtube-transcript';
+import { IngestionError } from './ingestionError';
 
 const YOUTUBE_HOST_PATTERN = /(^|\.)(youtube\.com|youtu\.be)$/i;
 
@@ -10,40 +11,47 @@ export function isYoutubeUrl(rawUrl: string): boolean {
   }
 }
 
+async function fetchOembedTitle(rawUrl: string): Promise<string | null> {
+  try {
+    const oembedResponse = await fetch(
+      `https://www.youtube.com/oembed?url=${encodeURIComponent(rawUrl)}&format=json`,
+    );
+    if (!oembedResponse.ok) return null;
+    const data = (await oembedResponse.json()) as { title?: string };
+    return data.title || null;
+  } catch {
+    return null; // Title lookup is best-effort; falling back to the raw URL is fine.
+  }
+}
+
 /** Pulls the spoken-word training content out of a YouTube video via its captions. */
 export async function fetchYoutubeContent(rawUrl: string): Promise<{ title: string; text: string }> {
-  let segments;
-  try {
-    segments = await YoutubeTranscript.fetchTranscript(rawUrl);
-  } catch (err) {
-    throw new Error(
-      err instanceof Error
-        ? `Could not fetch captions for that video: ${err.message}`
-        : 'Could not fetch captions for that video.',
-    );
-  }
-  if (!segments.length) {
-    throw new Error('No captions/transcript are available for that video.');
+  // Captions and the oEmbed title are independent lookups against the same
+  // video — fetch them concurrently instead of paying both round trips serially.
+  const [transcriptResult, oembedTitle] = await Promise.all([
+    YoutubeTranscript.fetchTranscript(rawUrl).catch((err: unknown) => {
+      throw new IngestionError(
+        err instanceof Error
+          ? `Could not fetch captions for that video: ${err.message}`
+          : 'Could not fetch captions for that video.',
+      );
+    }),
+    fetchOembedTitle(rawUrl),
+  ]);
+
+  if (!transcriptResult.length) {
+    throw new IngestionError('No captions/transcript are available for that video.');
   }
 
-  const text = segments
+  const text = transcriptResult
     .map((segment) => segment.text)
     .join(' ')
     .replace(/\s+/g, ' ')
     .trim();
 
-  let title = rawUrl;
-  try {
-    const oembedResponse = await fetch(
-      `https://www.youtube.com/oembed?url=${encodeURIComponent(rawUrl)}&format=json`,
-    );
-    if (oembedResponse.ok) {
-      const data = (await oembedResponse.json()) as { title?: string };
-      if (data.title) title = data.title;
-    }
-  } catch {
-    // Title lookup is best-effort; falling back to the raw URL is fine.
+  if (!text) {
+    throw new IngestionError('That video\'s captions contained no usable text.');
   }
 
-  return { title, text };
+  return { title: oembedTitle || rawUrl, text };
 }

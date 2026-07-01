@@ -65,7 +65,15 @@ function normalize(vector: number[]): number[] {
 }
 
 export function cosineSimilarity(a: number[], b: number[]): number {
-  const len = Math.min(a.length, b.length);
+  // Mismatched dimensions mean the two vectors came from different embedding
+  // spaces (e.g. the tenant's corpus was embedded via OpenAI before
+  // OPENAI_API_KEY was removed, and the query is now embedded via the local
+  // hash fallback). Truncating to the shorter vector and comparing anyway
+  // would produce a numeric-looking but meaningless score; treating it as
+  // "not similar" surfaces as fewer/no retrieved chunks instead of silently
+  // garbage-ranked ones.
+  if (a.length !== b.length) return 0;
+  const len = a.length;
   let dot = 0;
   let magA = 0;
   let magB = 0;

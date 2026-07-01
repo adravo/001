@@ -58,8 +58,10 @@ export const Avatar = forwardRef<AvatarHandle, AvatarProps>(({ avatarUrl, mouthL
   const group = useRef<THREE.Group>(null);
 
   const mouthTargets = useMemo(() => findMorphTargets(scene, MOUTH_OPEN_KEYS), [scene]);
-  const blinkLeftTargets = useMemo(() => findMorphTargets(scene, BLINK_LEFT_KEYS), [scene]);
-  const blinkRightTargets = useMemo(() => findMorphTargets(scene, BLINK_RIGHT_KEYS), [scene]);
+  const blinkTargets = useMemo(
+    () => [...findMorphTargets(scene, BLINK_LEFT_KEYS), ...findMorphTargets(scene, BLINK_RIGHT_KEYS)],
+    [scene],
+  );
   const headBone = useMemo(() => findBone(scene, /head/i), [scene]);
 
   const gestureRef = useRef<{ tone: ResponseTone; startedAt: number } | null>(null);
@@ -100,7 +102,7 @@ export const Avatar = forwardRef<AvatarHandle, AvatarProps>(({ avatarUrl, mouthL
     } else if (msUntilBlink <= -BLINK_DURATION_MS) {
       nextBlinkAt.current = now + 2500 + Math.random() * 3000;
     }
-    for (const { mesh, index } of [...blinkLeftTargets, ...blinkRightTargets]) {
+    for (const { mesh, index } of blinkTargets) {
       if (!mesh.morphTargetInfluences) continue;
       mesh.morphTargetInfluences[index] = blinkValue;
     }

@@ -15,6 +15,7 @@ export function ChatPanel({ messages, isLoading, isSpeaking, errorMessage, onSen
   const listEndRef = useRef<HTMLDivElement>(null);
 
   const { isSupported, isListening, interimTranscript, start, stop } = useSpeechRecognition((finalText) => {
+    if (isLoading) return; // a send is already in flight; drop this transcript rather than race it
     onSend(finalText);
   });
 
@@ -63,6 +64,7 @@ export function ChatPanel({ messages, isLoading, isSpeaking, errorMessage, onSen
             type="button"
             className={`mic-button ${isListening ? 'mic-button--active' : ''}`}
             onClick={() => (isListening ? stop() : start())}
+            disabled={isLoading}
             title={isListening ? 'Stop listening' : 'Ask by voice'}
           >
             {isListening ? '● Listening' : '🎙'}

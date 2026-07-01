@@ -27,6 +27,7 @@ function App() {
   const lipSyncEngine = useMemo(() => new LipSyncEngine(), []);
 
   const handleSend = async (text: string) => {
+    if (isLoading) return; // a send is already in flight; avoid racing/duplicating it
     setErrorMessage(null);
     const history = messages;
     setMessages([...history, { role: 'trainee', content: text }]);
@@ -39,7 +40,15 @@ function App() {
 
       setIsSpeaking(true);
       try {
-        const audioBlob = await fetchTtsAudio(tenantId, result.reply);
+        // A server TTS failure (bad API key, provider outage, etc.) should
+        // degrade to the browser voice, same as "no provider configured" —
+        // not surface as a hard error that skips speaking the answer.
+        let audioBlob: Blob | null = null;
+        try {
+          audioBlob = await fetchTtsAudio(tenantId, result.reply);
+        } catch (ttsErr) {
+          console.warn('Server TTS failed, falling back to browser speech synthesis.', ttsErr);
+        }
         if (audioBlob) {
           await lipSyncEngine.speakWithAudio(audioBlob);
         } else {
