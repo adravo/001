@@ -35,9 +35,33 @@ backend/                       Express + TypeScript
   src/services/claude.ts        Trainer-persona system prompt + RAG context,
                                  calls the Claude API, extracts a tone tag
   src/services/tts.ts            Pluggable ElevenLabs/Azure TTS
+  src/services/pdf.ts            PDF text extraction (pdf-parse)
+  src/services/webpage.ts        Webpage scraping (cheerio) with an SSRF guard
+  src/services/youtube.ts        YouTube caption/transcript ingestion
+  src/services/urlGuard.ts       Blocks ingestion URLs resolving to
+                                 loopback/private/link-local addresses
   src/routes/                   /documents, /chat, /tts, /usage — all scoped
                                  under /api/tenants/:tenantId/*
 ```
+
+## Ingesting training material
+
+The Admin tab (or `POST /api/tenants/:tenantId/documents` directly) supports
+three sources, all chunked, embedded, and stored the same way:
+
+- **Pasted text** — `{ "title": "...", "text": "..." }`
+- **File upload** — multipart `file` field; `.txt`/`.md` are read as-is,
+  `.pdf` is parsed with `pdf-parse`
+- **URL** — `{ "url": "..." }`. A regular webpage is fetched and scraped for
+  readable text (`cheerio`); a YouTube link (`youtube.com`/`youtu.be`) is
+  ingested via its captions/transcript instead — the video must have
+  captions available. Title is optional for URL ingestion (auto-detected
+  from the page `<title>` or the video's oEmbed title).
+
+URL ingestion fetches arbitrary user-supplied hosts server-side, so it's
+guarded against SSRF: only `http`/`https` is allowed, the resolved hostname
+is checked against loopback/private/link-local ranges (including the cloud
+metadata address), and redirects are not followed automatically.
 
 ## MVP scope
 

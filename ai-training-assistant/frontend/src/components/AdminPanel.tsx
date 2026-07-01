@@ -1,10 +1,12 @@
-import { FormEvent, useCallback, useEffect, useState } from 'react';
+import { ChangeEvent, FormEvent, useCallback, useEffect, useState } from 'react';
 import {
   deleteDocument,
   DocumentMeta,
   getUsage,
+  ingestFromUrl,
   listDocuments,
   uploadDocument,
+  uploadDocumentFile,
   UsageStats,
 } from '../lib/api';
 
@@ -13,12 +15,21 @@ interface AdminPanelProps {
 }
 
 export function AdminPanel({ tenantId }: AdminPanelProps) {
-  const [title, setTitle] = useState('');
+  const [textTitle, setTextTitle] = useState('');
   const [text, setText] = useState('');
+  const [isSubmittingText, setIsSubmittingText] = useState(false);
+
+  const [selectedFile, setSelectedFile] = useState<File | null>(null);
+  const [fileTitle, setFileTitle] = useState('');
+  const [isSubmittingFile, setIsSubmittingFile] = useState(false);
+
+  const [url, setUrl] = useState('');
+  const [urlTitle, setUrlTitle] = useState('');
+  const [isSubmittingUrl, setIsSubmittingUrl] = useState(false);
+
   const [documents, setDocuments] = useState<DocumentMeta[]>([]);
   const [usage, setUsage] = useState<UsageStats | null>(null);
   const [status, setStatus] = useState<string | null>(null);
-  const [isSubmitting, setIsSubmitting] = useState(false);
 
   const refresh = useCallback(async () => {
     try {
@@ -34,28 +45,64 @@ export function AdminPanel({ tenantId }: AdminPanelProps) {
     refresh();
   }, [refresh]);
 
-  const handleFileChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    if (!file) return;
-    if (!title) setTitle(file.name.replace(/\.\w+$/, ''));
-    setText(await file.text());
-  };
-
-  const handleSubmit = async (e: FormEvent) => {
+  const handleTextSubmit = async (e: FormEvent) => {
     e.preventDefault();
-    if (!title.trim() || !text.trim()) return;
-    setIsSubmitting(true);
+    if (!textTitle.trim() || !text.trim()) return;
+    setIsSubmittingText(true);
     setStatus(null);
     try {
-      const meta = await uploadDocument(tenantId, title.trim(), text.trim());
+      const meta = await uploadDocument(tenantId, textTitle.trim(), text.trim());
       setStatus(`Ingested "${meta.title}" as ${meta.chunkCount} chunk(s).`);
-      setTitle('');
+      setTextTitle('');
       setText('');
       await refresh();
     } catch (err) {
       setStatus(err instanceof Error ? err.message : 'Failed to ingest document.');
     } finally {
-      setIsSubmitting(false);
+      setIsSubmittingText(false);
+    }
+  };
+
+  const handleFileChange = (e: ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0] ?? null;
+    setSelectedFile(file);
+    if (file && !fileTitle) setFileTitle(file.name.replace(/\.\w+$/, ''));
+  };
+
+  const handleFileSubmit = async (e: FormEvent) => {
+    e.preventDefault();
+    if (!selectedFile) return;
+    setIsSubmittingFile(true);
+    setStatus(null);
+    try {
+      const meta = await uploadDocumentFile(tenantId, selectedFile, fileTitle.trim() || undefined);
+      setStatus(`Ingested "${meta.title}" as ${meta.chunkCount} chunk(s).`);
+      setSelectedFile(null);
+      setFileTitle('');
+      (e.target as HTMLFormElement).reset();
+      await refresh();
+    } catch (err) {
+      setStatus(err instanceof Error ? err.message : 'Failed to ingest file.');
+    } finally {
+      setIsSubmittingFile(false);
+    }
+  };
+
+  const handleUrlSubmit = async (e: FormEvent) => {
+    e.preventDefault();
+    if (!url.trim()) return;
+    setIsSubmittingUrl(true);
+    setStatus(null);
+    try {
+      const meta = await ingestFromUrl(tenantId, url.trim(), urlTitle.trim() || undefined);
+      setStatus(`Ingested "${meta.title}" as ${meta.chunkCount} chunk(s).`);
+      setUrl('');
+      setUrlTitle('');
+      await refresh();
+    } catch (err) {
+      setStatus(err instanceof Error ? err.message : 'Failed to ingest from that URL.');
+    } finally {
+      setIsSubmittingUrl(false);
     }
   };
 
@@ -72,28 +119,65 @@ export function AdminPanel({ tenantId }: AdminPanelProps) {
     <div className="admin-panel">
       <h3>Training material — namespace: {tenantId}</h3>
       <p className="admin-hint">
-        Paste or upload text-based training content (policies, product docs, onboarding guides). It's chunked and
-        embedded into this customer's isolated RAG collection so the avatar can ground its answers in it.
+        Add training content from pasted text, an uploaded file, or a URL. Each is chunked and embedded into this
+        customer's isolated RAG collection so the avatar can ground its answers in it.
       </p>
 
-      <form className="admin-form" onSubmit={handleSubmit}>
+      <h4>Paste text</h4>
+      <form className="admin-form" onSubmit={handleTextSubmit}>
         <input
           type="text"
           placeholder="Document title"
-          value={title}
-          onChange={(e) => setTitle(e.target.value)}
+          value={textTitle}
+          onChange={(e) => setTextTitle(e.target.value)}
         />
-        <input type="file" accept=".txt,.md" onChange={handleFileChange} />
         <textarea
           placeholder="Paste training content here…"
           value={text}
           onChange={(e) => setText(e.target.value)}
-          rows={8}
+          rows={6}
         />
-        <button type="submit" disabled={isSubmitting || !title.trim() || !text.trim()}>
-          {isSubmitting ? 'Ingesting…' : 'Ingest document'}
+        <button type="submit" disabled={isSubmittingText || !textTitle.trim() || !text.trim()}>
+          {isSubmittingText ? 'Ingesting…' : 'Ingest text'}
         </button>
       </form>
+
+      <h4>Upload a file</h4>
+      <form className="admin-form" onSubmit={handleFileSubmit}>
+        <input
+          type="text"
+          placeholder="Document title (optional — defaults to file name)"
+          value={fileTitle}
+          onChange={(e) => setFileTitle(e.target.value)}
+        />
+        <input type="file" accept=".txt,.md,.pdf" onChange={handleFileChange} />
+        <button type="submit" disabled={isSubmittingFile || !selectedFile}>
+          {isSubmittingFile ? 'Ingesting…' : 'Ingest file'}
+        </button>
+      </form>
+
+      <h4>Ingest from a URL</h4>
+      <form className="admin-form" onSubmit={handleUrlSubmit}>
+        <input
+          type="text"
+          placeholder="Document title (optional — auto-detected)"
+          value={urlTitle}
+          onChange={(e) => setUrlTitle(e.target.value)}
+        />
+        <input
+          type="url"
+          placeholder="https://example.com/article or a YouTube link"
+          value={url}
+          onChange={(e) => setUrl(e.target.value)}
+        />
+        <button type="submit" disabled={isSubmittingUrl || !url.trim()}>
+          {isSubmittingUrl ? 'Fetching…' : 'Ingest URL'}
+        </button>
+      </form>
+      <p className="admin-hint">
+        Webpages are scraped for readable text. YouTube links are ingested via their captions/transcript — the
+        video must have captions available.
+      </p>
 
       {status && <div className="admin-status">{status}</div>}
 

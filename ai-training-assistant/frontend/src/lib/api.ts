@@ -69,6 +69,32 @@ export async function uploadDocument(
   return parseJsonOrThrow(response);
 }
 
+/** Uploads a file (.txt, .md, or .pdf) for server-side text extraction and ingestion. */
+export async function uploadDocumentFile(
+  tenantId: string,
+  file: File,
+  title?: string,
+): Promise<DocumentMeta> {
+  const formData = new FormData();
+  formData.append('file', file);
+  if (title) formData.append('title', title);
+  const response = await fetch(tenantUrl(tenantId, 'documents'), {
+    method: 'POST',
+    body: formData,
+  });
+  return parseJsonOrThrow(response);
+}
+
+/** Ingests a webpage (scraped for readable text) or a YouTube video (via its captions). */
+export async function ingestFromUrl(tenantId: string, url: string, title?: string): Promise<DocumentMeta> {
+  const response = await fetch(tenantUrl(tenantId, 'documents'), {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ url, title }),
+  });
+  return parseJsonOrThrow(response);
+}
+
 export async function listDocuments(tenantId: string): Promise<DocumentMeta[]> {
   const response = await fetch(tenantUrl(tenantId, 'documents'));
   return parseJsonOrThrow(response);
