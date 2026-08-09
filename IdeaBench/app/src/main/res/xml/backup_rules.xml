@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="utf-8"?>
+<full-backup-content>
+    <!-- Never back up the encrypted API key store. -->
+    <exclude domain="sharedpref" path="idea_bench_secure_prefs.xml" />
+    <exclude domain="sharedpref" path="idea_bench_secure_prefs.preferences_pb" />
+</full-backup-content>
